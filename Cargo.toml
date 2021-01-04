@@ -1,0 +1,71 @@
+[package]
+name = "quizzer-server"
+version = "0.1.0"
+authors = ["Tin Švagelj <tin.svagelj@live.com>"]
+edition = "2018"
+
+[dependencies]
+
+# Web
+rust-crypto = "0.2.36"
+mongodb = "1.1.1"
+jsonwebtoken = "7.2.0"
+
+# Serialization
+bson = "1.1.0"
+serde_yaml = "0.8"
+serde_json = "1.0"
+
+# Functionality
+regex = "0.2"
+dotenv = "0.15.0"
+num_enum = "0.5.1"
+
+# Logging
+log = "0.4"
+# log4rs = "1.0.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+[dependencies.rocket] # TODO: Switch to 0.5.0 when released
+git = "https://github.com/SergioBenitez/Rocket"
+branch = "master"
+features = [
+    "tls",
+    "secrets",
+]
+
+[dependencies.rocket_contrib]
+git = "https://github.com/SergioBenitez/Rocket"
+branch = "master"
+features = [
+    "helmet",
+    "uuid",
+]
+
+[dependencies.tokio]
+version = "0.3"
+features = [
+    "full"
+]
+
+[dependencies.serde]
+version = "1.0"
+features = [
+    "derive"
+]
+
+[dependencies.chrono]
+version = "0.4.19"
+features = [
+    "serde"
+]
+
+[dependencies.uuid]
+version = "0.8.1"
+features = [
+    "serde",
+    "v4"
+]
