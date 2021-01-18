@@ -11,6 +11,7 @@ use crate::user::{User, USER_COLLECTION_NAME};
 use crate::role::Role;
 use crate::error::{Problem, problems};
 use crate::config::Config;
+use crate::route::parse_uuid;
 
 /* TODO: Support paging
 // Responder isn't implemented for Vec.
@@ -38,19 +39,6 @@ pub async fn user_list(db: State<'_, Database>) -> Result<Vec<User>, Problem> {
     Ok(users)
 }
 */
-
-#[inline]
-pub fn parse_uuid<'r>(id: &String) -> Result<Uuid, Problem> {
-    match Uuid::parse_str(id.clone().as_str()) {
-        Ok(it) => Ok(it),
-        Err(_) => Err(
-            problems::parse_problem()
-                .insert_serialized("parsed", id.clone())
-                .detail("UUID parsing failed.")
-                .clone()
-        )
-    }
-}
 
 #[inline]
 pub fn filter_user_id(id: Uuid) -> Document {
@@ -89,7 +77,7 @@ pub async fn user_get(id: String, db: State<'_, Database>) -> Result<Option<User
 }
 
 #[derive(Clone, FromForm)]
-pub struct CreateUser {
+pub struct UserAuthInfo {
     username: String,
     password: String,
 }
@@ -124,8 +112,15 @@ fn user_not_found(id: Uuid) -> Problem {
         .insert_serialized("id", id.to_string())
         .clone()
 }
+#[inline]
+fn login_problem() -> Problem {
+    Problem::new_untyped(
+        Status::Unauthorized,
+        "Bad username or password."
+    )
+}
 
-impl CreateUser {
+impl UserAuthInfo {
     pub fn validate(&self) -> Result<(), Problem> {
 
         if self.username.len() < 5 {
@@ -163,7 +158,7 @@ impl CreateUser {
 }
 
 #[post("/", data = "<create_user>")]
-pub async fn user_create<'a>(create_user: Form<CreateUser>, cookies: &'a CookieJar<'_>, db: State<'_, Database>, c: State<'_, Config>) -> Result<User, Problem> {
+pub async fn user_create<'a>(create_user: Form<UserAuthInfo>, cookies: &'a CookieJar<'_>, db: State<'_, Database>, c: State<'_, Config>) -> Result<User, Problem> {
     create_user.validate()?;
 
     let mut user = User::new(
@@ -194,9 +189,52 @@ pub async fn user_create<'a>(create_user: Form<CreateUser>, cookies: &'a CookieJ
         .map_err(|e| Problem::from(e))?;
 
     let urt = UserRolesToken::new(&user.clone());
-    cookies.add(urt.cookie()?);
+    cookies.add_private(urt.cookie()?);
 
     Ok(user)
+}
+
+#[post("/", data = "<login_user>")]
+pub async fn login_submit<'a>(login_user: Form<UserAuthInfo>, cookies: &'a CookieJar<'_>, db: State<'_, Database>) -> Result<User, Problem> {
+    login_user.validate()?;
+
+    let user = User::new(
+        login_user.username.clone(),
+        login_user.password.clone(),
+    );
+
+    let user_document = db.collection(USER_COLLECTION_NAME).find_one(
+        filter_user_username(user.username.clone()),
+        None,
+    ).await.expect("Unable to query by username.");
+
+    let db_user: Option<User> = match user_document {
+        Some(doc) => Some(
+            from_bson(Bson::Document(doc))
+                .map_err(|e| Problem::from(e))?
+        ),
+        None => None
+    };
+
+    let password_correct = match db_user.clone() {
+        Some(it) => {
+            it.pw_hash == user.pw_hash
+        }
+        None => {
+            false
+        }
+    };
+
+    if password_correct {
+        return Err(login_problem())
+    }
+
+    let existing_db_user = db_user.expect("Should've returned earlier.");
+
+    let urt = UserRolesToken::new(&existing_db_user.clone());
+    cookies.add_private(urt.cookie()?);
+
+    Ok(existing_db_user)
 }
 
 #[delete("/<id>")]

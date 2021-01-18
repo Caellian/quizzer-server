@@ -2,11 +2,13 @@ use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::{Algorithm, decode, DecodingKey, encode, EncodingKey, Header, Validation};
 use rocket::http::{Status, CookieJar, Cookie};
 use serde::{Deserialize, Serialize};
+use rocket::request::{self, Request, FromRequest};
 
 use crate::role::Role;
 use crate::user::User;
 use crate::error::Problem;
 use uuid::Uuid;
+use rocket::outcome::Outcome::{Failure, Success};
 
 pub static USER_AUTH_KEY: &'static [u8] = include_bytes!("../jwt-keys/user_auth");
 pub static USER_AUTH_PUB_KEY: &'static [u8] = include_bytes!("../jwt-keys/user_auth.pub");
@@ -19,7 +21,7 @@ pub struct UserRolesToken {
     iat: DateTime<Utc>,
     #[serde(with = "jwt_numeric_date")]
     exp: DateTime<Utc>,
-    user: Uuid,
+    pub user: Uuid,
     roles: Vec<Role>,
 }
 
@@ -34,8 +36,17 @@ impl UserRolesToken {
         }
     }
 
-    pub fn has_role(&self, role: &Role) -> bool {
-        self.roles.contains(role)
+    pub fn has_role(&self, role: Role) -> bool {
+        self.roles.contains(&role)
+    }
+
+    pub fn has_min_role(&self, role: Role) -> bool {
+        for r in &self.roles {
+            if r >= &role {
+                return true;
+            }
+        }
+        return false;
     }
 
     pub fn encode_jwt(&self) -> Result<String, jsonwebtoken::errors::Error> {
@@ -58,7 +69,7 @@ impl UserRolesToken {
     }
 }
 
-fn auth_problem<S: Into<String>>(detail: S) -> Problem {
+pub fn auth_problem<S: Into<String>>(detail: S) -> Problem {
     Problem::new_untyped(
         Status::Unauthorized,
         "Unable to authorize user.",
@@ -67,9 +78,10 @@ fn auth_problem<S: Into<String>>(detail: S) -> Problem {
         .clone()
 }
 
-pub fn extract_claims(cookies: CookieJar) -> Result<UserRolesToken, Problem> {
-    let token = match cookies.get(AUTH_COOKIE_NAME) {
-        Some(jwt) => jwt.value(),
+pub fn extract_claims(cookies: &CookieJar) -> Result<UserRolesToken, Problem> {
+    let auth_cookie = cookies.get_private(AUTH_COOKIE_NAME);
+    let token = match auth_cookie {
+        Some(jwt) => jwt.value().to_owned(),
         None => {
             return Err(auth_problem("Couldn't extract auth JWT from cookie."));
         }
@@ -82,6 +94,20 @@ pub fn extract_claims(cookies: CookieJar) -> Result<UserRolesToken, Problem> {
     ).map(|data| data.claims) {
         Ok(it) => Ok(it),
         Err(_) => Err(auth_problem("JWT cookie was malformed."))
+    }
+}
+
+#[rocket::async_trait]
+impl<'a, 'r> FromRequest<'a, 'r> for UserRolesToken {
+    type Error = Problem;
+
+    async fn from_request(req: &'a Request<'r>) -> request::Outcome<Self, Self::Error> {
+        let claims = match extract_claims(req.cookies()) {
+            Ok(it) => it,
+            Err(e) => return Failure((Status::Unauthorized, e))
+        };
+
+        return Success(claims);
     }
 }
 

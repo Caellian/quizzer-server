@@ -35,7 +35,7 @@ impl User {
             id: uuid, // TODO: While highly unlikely, what if UUID exists?
             username,
             pw_hash,
-            user_roles: vec![Role::Normal], // TODO: Database should append roles
+            user_roles: vec![Role::Normal],
         }
     }
 
